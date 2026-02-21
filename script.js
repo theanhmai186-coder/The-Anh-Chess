@@ -8,6 +8,9 @@ var $whiteTimer = $('#whiteTimer');
 var $blackTimer = $('#blackTimer');
 var playerSide = 'w';
 
+var originalHistory = []; // Lưu lại toàn bộ nước đi chính thức
+var currentViewIndex = -1; // Vị trí nước đi đang xem
+
 // Engine
 var stockfish = null;
 var isEngineReady = false;
@@ -71,23 +74,36 @@ async function initEngine() {
 }
 
 function askEngine() {
-        // CHỈ cho phép máy tính toán nếu game ĐANG CHẠY và đang ở nước đi mới nhất
-    // Nếu redoStack có quân (nghĩa là đang tua lại xem quá khứ), máy không được đi.
     if (!gameActive || !isEngineReady || currentMode !== 'computer' || redoStack.length > 0) return;
     
-    // Lấy level từ input (1-20)
     var level = parseInt($('#engineLevel').val()) || 10;
-    // Giới hạn level trong khoảng 0-20 (Stockfish Skill Level)
     var skill = Math.max(0, Math.min(20, level)); 
     
     stockfish.postMessage('position fen ' + game.fen());
     stockfish.postMessage('setoption name Skill Level value ' + skill);
     
-    // Tính toán depth dựa trên level để phản hồi nhanh hơn ở level thấp
-    // Level 1 -> depth 1, Level 20 -> depth 15+
-    var depth = Math.max(1, Math.floor(skill * 0.8) + 1);
+    // --- LOGIC TÍNH THỜI GIAN THÔNG MINH ---
+    var engineTurn = game.turn();
+    var timeLeft = (engineTurn === 'w') ? whiteTime : blackTime;
     
-    stockfish.postMessage('go depth ' + depth); 
+    var thinkTime;
+    
+    if (timeLeft > 60) {
+        // Còn nhiều thời gian (>1 phút): Cho phép nghĩ 3-5 giây tùy level
+        thinkTime = Math.max(1000, skill * 250); 
+    } else if (timeLeft > 20) {
+        // Thời gian trung bình (20s - 60s): Nghĩ khoảng 1.5 giây
+        thinkTime = 1500;
+    } else if (timeLeft > 5) {
+        // Sắp hết thời gian (5s - 20s): Ép nghĩ trong 0.7 giây
+        thinkTime = 700;
+    } else {
+        // Cực kỳ ít thời gian (<5s): Đi gần như ngay lập tức (0.3 giây)
+        thinkTime = 300;
+    }
+
+    // Gửi lệnh movetime (đơn vị mili giây) thay vì depth
+    stockfish.postMessage('go movetime ' + thinkTime); 
 }
 
 function makeEngineMove(bestMoveString) {
@@ -138,57 +154,57 @@ function showDots(square) {
 // --- 3. INTERACTION LOGIC ---
 
 function onDragStart(source, piece) {
-    if (game.game_over()) return false;
-
-    // CHẾ ĐỘ 2 NGƯỜI CHƠI (Human)
+    if (game.game_over()) {
+        // Sau khi kết thúc ván, cho phép cầm bất cứ quân nào để phân tích
+        return true; 
+    }
+    
+    // Logic cũ cho khi đang trong ván đấu...
     if (currentMode === 'human') {
-        // Chỉ cho phép đi quân đúng lượt (Trắng đi lượt w, Đen đi lượt b)
         if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-            (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
-            return false;
-        }
-    } 
-    // CHẾ ĐỘ ĐẤU VỚI MÁY (Computer)
-    else {
-        // Chỉ cho phép cầm quân của playerSide và phải đúng lượt
-        if (piece.search(new RegExp('^' + (playerSide === 'w' ? 'b' : 'w'))) !== -1 || 
-            game.turn() !== playerSide) {
-            return false;
-        }
+            (game.turn() === 'b' && piece.search(/^w/) !== -1)) return false;
+    } else {
+        var myPiece = (playerSide === 'w' && piece.search(/^w/) !== -1) || 
+                      (playerSide === 'b' && piece.search(/^b/) !== -1);
+        if (!myPiece) return false;
     }
 
+    playSound(sounds.labelClick);
     removeHighlights();
     selectedSquare = source;
-    showDots(selectedSquare);
+    if (game.turn() === playerSide || currentMode === 'human') showDots(selectedSquare);
     return true;
 }
 
 function onDrop(source, target) {
     if (source === target) return;
 
-    // Thử thực hiện nước đi
-    var move = game.move({
-        from: source,
-        to: target,
-        promotion: 'q'
-    });
+    var move = game.move({ from: source, to: target, promotion: 'q' });
 
-    // 1. NẾU NƯỚC ĐI HỢP LỆ
-    if (move !== null) {
+    // NẾU VÁN ĐẤU ĐÃ KẾT THÚC (Chế độ Phân tích/Variation)
+    if (!gameActive && game.game_over()) {
+        if (move === null) return 'snapback';
+        
+        board.position(game.fen());
+        playSound(move.captured ? sounds.capture : sounds.move);
+        updateMaterial();
+        // Không gọi handleMoveMade để tránh kích hoạt Engine hoặc Premove
+        return; 
+    }
+
+    // LOGIC KHI ĐANG TRONG VÁN (Giữ nguyên phần Premove bạn đã có nhưng thêm check gameActive)
+    if (move !== null && gameActive) {
         removeHighlights();
-        premove = null; // Xóa Premove nếu có
+        premove = null;
         $('.square-55d63').removeClass('premove-highlight');
         handleMoveMade(move);
-    } 
-    // 2. NẾU NƯỚC ĐI KHÔNG HỢP LỆ
-    else {
-        // Chỉ cho phép Premove nếu đang đấu với MÁY và chưa tới lượt mình
-        if (currentMode === 'computer' && game.turn() !== playerSide) {
-            premove = { from: source, to: target };
-            removeHighlights();
-            $('.square-' + source).addClass('premove-highlight');
-            $('.square-' + target).addClass('premove-highlight');
-        }
+    } else if (currentMode === 'computer' && gameActive) {
+        premove = { from: source, to: target };
+        removeHighlights();
+        $('.square-' + source).addClass('premove-highlight');
+        $('.square-' + target).addClass('premove-highlight');
+        return 'snapback';
+    } else {
         return 'snapback';
     }
 }
@@ -199,18 +215,19 @@ $(document).on('click', '.square-55d63', function() {
     var piece = game.get(targetSquare);
 
     if (!selectedSquare) {
-        // Kiểm tra xem quân bấm vào có đúng lượt không
         var isTurn = piece && piece.color === game.turn();
-        
-        // Nếu là đấu máy, chỉ cho chọn quân của mình
         if (currentMode === 'computer' && playerSide !== game.turn()) isTurn = false;
 
         if (isTurn) {
+            // --- THÊM DÒNG NÀY (Khi chọn quân lần đầu) ---
+            playSound(sounds.labelClick);
+            // ------------------------------------------
             selectedSquare = targetSquare;
             showDots(targetSquare);
         }
         return;
     }
+
 
     // Nếu đã chọn 1 quân trước đó, thực hiện đi hoặc đổi quân
     var move = game.move({ from: selectedSquare, to: targetSquare, promotion: 'q' });
@@ -220,12 +237,14 @@ $(document).on('click', '.square-55d63', function() {
         removeHighlights();
         selectedSquare = null;
         handleMoveMade(move);
-    } else {
-        // Đổi quân chọn nếu bấm vào quân khác cùng màu và đúng lượt
+     } else {
         var isTurn = piece && piece.color === game.turn();
         if (currentMode === 'computer' && playerSide !== game.turn()) isTurn = false;
 
         if (isTurn) {
+            // --- THÊM DÒNG NÀY (Khi đổi chọn quân khác cùng màu) ---
+            playSound(sounds.labelClick);
+            // ---------------------------------------------------
             removeHighlights();
             selectedSquare = targetSquare;
             showDots(targetSquare);
@@ -274,38 +293,28 @@ function handleMoveMade(move) {
     updateStatus();
     updateMoveLog();
 
-     if (currentMode === 'computer' && game.turn() !== playerSide && !game.game_over()) {
-        // Delay một chút cho tự nhiên
-        setTimeout(askEngine, 600);
-    }
-    
-   // Gọi máy nếu chơi với máy và KHÔNG PHẢI lượt của người chơi
-    if (currentMode === 'computer' && game.turn() !== playerSide && !game.game_over()) {
-        setTimeout(askEngine, 600);
-    }
- // --- THÊM ĐOẠN NÀY VÀO CUỐI HÀM ---
+   // Kiểm tra Premove: Nếu đến lượt người chơi và có nước đi đang chờ
     if (game.turn() === playerSide && premove) {
         var pMove = premove;
-        premove = null; // Xóa ngay để tránh lặp
-        
+        premove = null; // Xóa ngay để tránh lặp lại logic
+        $('.square-55d63').removeClass('premove-highlight');
+
         // Thử thực hiện nước đi đã lưu
-        var result = game.move({
-            from: pMove.from,
-            to: pMove.to,
-            promotion: 'q'
-        });
+        var result = game.move({ from: pMove.from, to: pMove.to, promotion: 'q' });
 
         if (result) {
-            // Nếu nước đi hợp lệ tại thời điểm này
+            // Nếu Premove hợp lệ, cập nhật bàn cờ và gọi lại handleMoveMade
             setTimeout(function() {
                 board.position(game.fen());
-                $('.square-55d63').removeClass('premove-highlight');
                 handleMoveMade(result);
-            }, 100); // Delay cực nhỏ để tạo cảm giác mượt
-        } else {
-            // Nếu nước đi không còn hợp lệ (ví dụ ô đó bị đối thủ chiếm mất)
-            $('.square-55d63').removeClass('premove-highlight');
+            }, 100); // Delay 100ms để người dùng kịp nhìn thấy nước máy đi
+            return; // Thoát hàm, không gọi máy ở đây vì handleMoveMade sẽ được gọi lại
         }
+    }
+
+    // Nếu không có Premove, máy (Stockfish) mới được phép đi
+    if (currentMode === 'computer' && game.turn() !== playerSide && !game.game_over()) {
+        setTimeout(askEngine, 600);
     }
 }
 
@@ -396,87 +405,75 @@ function updateStatus() {
 }
 
 function updateMoveLog() {
-    const currentHistory = game.history(); 
-    const futureMoves = redoStack.slice().reverse().map(m => m.san);
-    const fullHistory = currentHistory.concat(futureMoves);
-
-    let html = '';
+    // Nếu ván đấu kết thúc, dùng originalHistory, nếu đang đánh dùng game.history()
+    var history = (!gameActive && originalHistory.length > 0) ? originalHistory : game.history();
     
-    for (let i = 0; i < fullHistory.length; i += 2) {
+    let html = '';
+    for (let i = 0; i < history.length; i += 2) {
         let moveNum = (i / 2) + 1;
-
-        // Xử lý nước đi của Trắng
-        let wIndex = i;
-        let wClass = (wIndex === currentHistory.length - 1) ? 'current-move' : 'move-link';
         
-        // Đã thay ngoặc vuông thành <> theo yêu cầu của bạn:
-        let wMove = `<span class="${wClass}" data-index="${wIndex}">${fullHistory[wIndex]}</span>`;
+        // Nước đi trắng
+        let wClass = (!gameActive && currentViewIndex === i) ? 'current-move' : 'move-link';
+        let wMove = `<span class="${wClass}" data-index="${i}">${history[i]}</span>`;
 
-        // Xử lý nước đi của Đen
-        let bMove = ''; // Chú ý: Chỗ này là 2 dấu nháy đơn (chuỗi rỗng), đừng để là mảng nhé
-        let bIndex = i + 1;
-        if (bIndex < fullHistory.length) {
-            let bClass = (bIndex === currentHistory.length - 1) ? 'current-move' : 'move-link';
-            
-            // Đã thay ngoặc vuông thành <> theo yêu cầu của bạn:
-            bMove = `<span class="${bClass}" data-index="${bIndex}">${fullHistory[bIndex]}</span>`;
+        // Nước đi đen
+        let bMove = '';
+        if (history[i + 1]) {
+            let bClass = (!gameActive && currentViewIndex === i + 1) ? 'current-move' : 'move-link';
+            bMove = `<span class="${bClass}" data-index="${i + 1}">${history[i + 1]}</span>`;
         }
 
         html += `<span class="move-num">${moveNum}.</span> ${wMove} ${bMove} `;
     }
 
     $moveLog.html(html || '<span class="move-link">1. Ready...</span>');
-
-    if (redoStack.length === 0) {
-        $('.log-area').scrollTop(9999);
-    }
+    $('.log-area').scrollTop(9999);
 }
 
 // --- LƯỚT XEM LỊCH SỬ THẾ TRẬN ---
+// Thêm biến để theo dõi vị trí nước đi trong lịch sử thực tế
+var currentViewIndex = -1;
+
 function goToMove(targetIndex) {
-    if (game.history().length === 0 && redoStack.length === 0) return; 
+    if (originalHistory.length === 0) return;
 
-    let currentIndex = game.history().length - 1;
-    if (targetIndex === currentIndex) return;
+    // Giới hạn targetIndex
+    if (targetIndex < -1) targetIndex = -1;
+    if (targetIndex >= originalHistory.length) targetIndex = originalHistory.length - 1;
 
-    removeHighlights();
+    currentViewIndex = targetIndex;
 
-
-    if (targetIndex < currentIndex) {
-        // Tua về quá khứ
-        let steps = currentIndex - targetIndex;
-        for (let i = 0; i < steps; i++) {
-            let move = game.undo();
-            if (move) redoStack.push(move);
-        }
-    } else {
-        // Tua tới tương lai
-        let steps = targetIndex - currentIndex;
-        for (let i = 0; i < steps; i++) {
-            if (redoStack.length > 0) {
-                let moveObj = redoStack.pop();
-                game.move(moveObj);
-            }
-        }
+    // Dựng lại bàn cờ từ đầu đến targetIndex
+    var tempGame = new Chess();
+    for (var i = 0; i <= targetIndex; i++) {
+        tempGame.move(originalHistory[i]);
     }
 
-    // Cập nhật giao diện sau khi tua
+    game.load(tempGame.fen()); // Cập nhật trạng thái bàn cờ hiện tại
     board.position(game.fen());
+    
     updateMoveLog();
     updateStatus();
-    playSound(sounds.move);
-    if (typeof updateMaterial === 'function') updateMaterial();
+    updateMaterial();
+    removeHighlights();
 }
 
+// Gắn vào nút <
 function stepBackward() {
-    let currentIndex = game.history().length - 1;
-    if (currentIndex >= 0) goToMove(currentIndex - 1);
+    if (!gameActive) {
+        goToMove(currentViewIndex - 1);
+    } else {
+        undoMove(); // Nếu đang đánh thì dùng Undo cũ
+    }
 }
 
+// Gắn vào nút >
 function stepForward() {
-    let currentIndex = game.history().length - 1;
-    let fullLength = game.history().length + redoStack.length;
-    if (currentIndex < fullLength - 1) goToMove(currentIndex + 1);
+    if (!gameActive) {
+        goToMove(currentViewIndex + 1);
+    } else {
+        redoMove(); // Nếu đang đánh thì dùng Redo cũ
+    }
 }
 
 function startTimer() {
@@ -525,19 +522,20 @@ function updateTimers() {
     $whiteTimer.toggleClass('out-of-time', whiteTime <= 0);
     $blackTimer.toggleClass('out-of-time', blackTime <= 0);
 }
-function endGame(loser) {
+function endGame() {
     gameActive = false;
     clearInterval(timerInterval);
     
-    // Không khóa board hoàn toàn để người dùng vẫn có thể click vào ô cờ xem gợi ý (nếu muốn)
-    // Nhưng onDragStart sẽ chặn việc di chuyển quân cờ mới
+    // Khóa lịch sử chính thức lại
+    originalHistory = game.history(); 
+    currentViewIndex = originalHistory.length - 1;
+
+    $status.html("<span style='color: #ff4d4d;'>TRẬN ĐẤU KẾT THÚC!</span> Xem lại hoặc thử biến thể.");
     
-    $status.html("<span style='color: #ff4d4d;'>TRẬN ĐẤU KẾT THÚC!</span> Đang ở chế độ xem lại.");
-    
-    $('#middleBtn')
-        .attr('title', 'Chơi ván mới')
+    $('#middleBtn').attr('title', 'Chơi ván mới')
         .html('<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>');
     
+    updateMoveLog(); // Gọi để vẽ lại biên bản cố định
     playSound(sounds.notify);
 }
 
@@ -555,6 +553,10 @@ function resizeBoard() {
 }
 
 function resetGame() {
+    originalHistory = [];
+    currentViewIndex = -1;
+    window.finalGameHistory = null; // Xóa lịch sử ván cũ
+    currentViewIndex = -1;
     game.reset();
     gameActive = true;
     selectedSquare = null;
@@ -594,7 +596,7 @@ function resetGame() {
     if (currentMode === 'computer') {
         // Đã tiêm biến botRating và humanRating vào trong thẻ span
         topName = `Thế Anh <span class="rating">${botRating}</span>`;
-        bottomName = `YOU SUCKER <span class="rating">${humanRating}</span>`;
+        bottomName = `You <span class="rating">${humanRating}</span>`;
         
         if (playerSide === 'w') {
             topTimer = 'blackTimer'; bottomTimer = 'whiteTimer';
@@ -700,6 +702,9 @@ function resetGame() {
     if (currentMode === 'computer' && playerSide === 'b') {
         setTimeout(askEngine, 1000);
     }
+    premove = null;
+    $('.square-55d63').removeClass('premove-highlight');
+
 }
 
 

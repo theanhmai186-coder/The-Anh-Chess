@@ -22,18 +22,19 @@ body {
     font-family: 'Source Serif 4', serif;
     color: var(--text-primary);
     margin: 0;
-    /* SỬA: Dùng min-height thay vì height cố định để cho phép cuộn khi cần */
-    min-height: 100vh;
-    width: 100vw;
+    min-height: 100vh; /* Sửa từ height thành min-height */
     display: flex;
     flex-direction: column;
-    /* SỬA: Cho phép cuộn dọc nếu nội dung tràn */
-    overflow-x: hidden; 
-    overflow-y: auto;
+    overflow-y: auto;  /* Cho phép hiện thanh cuộn khi nội dung dài */
+    overflow-x: hidden;
+    scroll-behavior: smooth; /* Cuộn mượt */
+
     
     -webkit-user-select: none; /* Safari */
     -ms-user-select: none; /* IE 10+ */
     user-select: none; /* Standard */
+    -webkit-touch-callout: none;
+
     
 }
 
@@ -78,11 +79,11 @@ body {
 }
 
 .brand span { 
-    font-size: 0.6rem; 
+    font-size: 0.55rem; 
     color: var(--text-secondary); 
     text-transform: uppercase; 
     display: block;
-    margin-top: 3px;
+    margin-top: 1px;
     text-align: center;     /* Đảm bảo chữ nằm giữa */
     
     /* Tùy chỉnh khoảng cách chữ cho thưa ra một chút cho sang */
@@ -174,11 +175,11 @@ body {
 
 /* --- MAIN CONTAINER --- */
 .main-container {
-    height: calc(100vh - var(--header-height)); /* Chiếm phần còn lại của màn hình */
+    min-height: calc(100vh - var(--header-height)); /* Sửa từ height thành min-height */
     width: 100%;
     display: flex;
     justify-content: center;
-    align-items: center; /* Căn giữa dọc */
+    align-items: center;
     gap: 30px;
     padding: 20px;
     box-sizing: border-box;
@@ -187,10 +188,10 @@ body {
 /* --- LEFT: BOARD CARD --- */
 .board-card {
     
-    /* Responsive Size Logic */
-    height: 90%;
-    max-height: 800px;
-    aspect-ratio: 9/10; /* Tỷ lệ khung hình để chứa bàn cờ + info */
+    /* Responsive Size Logic - ĐÃ SỬA LỖI VỠ GIAO DIỆN */
+    width: 100%;
+    max-width: 550px;  /* Giới hạn độ rộng vừa mắt trên máy tính */
+    height: auto;      /* Quan trọng: Tự động kéo dài chiều cao bao trọn nội dung */
     
     border: var(--border-line);
     border-radius: 20px;
@@ -200,7 +201,7 @@ body {
     
     display: flex;
     flex-direction: column;
-    justify-content: space-between; /* Đẩy Info lên đầu và xuống cuối */
+    justify-content: space-between;
 }
 .board-card.flip-layout {
     flex-direction: column-reverse;
@@ -632,14 +633,132 @@ body {
 }
 
 .current-move {
-    background: rgba(255, 255, 255, 0.2) !important;
-    border-radius: 4px !important;
-    padding: 2px 4px !important;
-    color: #ffffff !important;
+    background: var(--accent-gold) !important;
+    color: #000 !important;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-weight: bold;
 }
 
 /* Màu đỏ cho ô Premove */
 .premove-highlight {
     background-color: rgba(255, 0, 0, 0.4) !important;
     box-shadow: inset 0 0 5px 2px rgba(255, 0, 0, 0.5);
+}
+
+.square-55d63 {
+    pointer-events: auto !important;
+}
+
+img {
+    -webkit-user-drag: none;
+    -khtml-user-drag: none;
+    -moz-user-drag: none;
+    -o-user-drag: none;
+    pointer-events: none; /* Điều này ngăn việc click chuột phải vào ảnh quân cờ */
+}
+
+/* --- SMOOTH SCROLL --- */
+html {
+    scroll-behavior: smooth;
+}
+
+/* --- FOOTER STYLES --- */
+.site-footer {
+    background-color: var(--panel-color);
+    border-top: var(--border-line);
+    padding: 50px 20px 30px 20px;
+    width: 100%;
+    flex-shrink: 0; 
+    box-sizing: border-box;
+}
+
+.footer-container {
+    max-width: 800px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column; /* Ép xếp dọc từ trên xuống */
+    align-items: center;    /* Căn giữa theo chiều ngang */
+    gap: 30px;              /* Khoảng cách giữa các phần */
+    text-align: center;
+}
+
+/* Brand */
+.footer-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.footer-logo {
+    color: #ffffff;
+    font-size: 2.2rem;
+    margin: 0;
+    letter-spacing: 4px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.footer-slogan {
+    color: #ffffff;
+    font-size: 0.75rem;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+    display: block;
+    margin-top: 5px;
+    opacity: 0.9;
+}
+
+/* Contact Info */
+.footer-contact ul { 
+    list-style: none; 
+    padding: 0; 
+    margin: 0; 
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.footer-contact ul li { 
+    font-size: 0.95rem; 
+    display: flex; 
+    justify-content: center; /* Căn giữa Label và Value */
+    align-items: center;
+    gap: 8px; 
+}
+
+.footer-contact .label { 
+    color: var(--text-secondary); 
+}
+
+.footer-contact .value { 
+    color: var(--text-primary); 
+    text-decoration: none; 
+}
+
+.footer-contact .link:hover { 
+    color: var(--accent-gold); 
+    transition: 0.3s; 
+}
+
+.footer-contact .highlight { 
+    color: var(--accent-gold); 
+    text-decoration: underline; 
+    font-weight: 600; 
+}
+
+/* Copyright */
+.footer-bottom {
+    margin-top: 10px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(204, 197, 168, 0.1);
+    width: 80%; /* Đường kẻ ngang chiếm 80% chiều rộng khung */
+    max-width: 400px;
+}
+
+.footer-bottom p {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    opacity: 0.6;
+    margin: 0;
 }
