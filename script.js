@@ -741,7 +741,7 @@ function resetGame() {
     updateTimers();
     updateMoveLog();
     if (typeof updateMaterial === 'function') updateMaterial();
-    $status.text("White to move");
+    $status.text("Đến trắng đi");
 
     // 4. Khởi tạo bàn cờ với hướng (Orientation) đúng
     if (board) board.destroy();
